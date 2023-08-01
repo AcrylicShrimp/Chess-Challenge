@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using ChessChallenge.API;
 
@@ -32,6 +32,8 @@ public class MyBot : IChessBot {
   /// Evaluate a position in perspective of current player. The value will be always positive.
   /// </summary>
   public static float EvaluateSinglePosition(Board board) {
+    if (board.IsInCheckmate()) return -1000;
+
     // If we're in check, we're losing.
     var score = board.IsInCheck() ? -1f : 0;
 
@@ -74,15 +76,16 @@ public class MyBot : IChessBot {
   /// Score a move with handcrafted heuristics.
   /// </summary>
   public static float ScoreMove(Board board, Move move) {
-    if (move.IsPromotion) return 20;
-    if (move.IsCapture) return 10;
-    if (move.IsCastles) return 5;
-
     board.MakeMove(move);
-    var opponentScore = -EvaluatePosition(board);
+    var score = -EvaluatePosition(board);
     board.UndoMove(move);
 
-    return opponentScore;
+    if (move.IsCastles) score += 0.5f;
+    if (move.MovePieceType == PieceType.King) score -= 0.5f;
+
+    score += (new Random().NextSingle() - 0.5f) * 0.1f;
+
+    return score;
   }
 
   /// <summary>
@@ -91,11 +94,10 @@ public class MyBot : IChessBot {
   public (float, Move?) NegamaxWithAlphaBeta(Board board, int depth, float alpha, float beta, float color, Timer timer) {
     // We've found a checkmate, so we'll return a very high value.
     if (board.IsInCheckmate())
-      return (100 * color, null);
+      return (1000 * color, null);
 
-    // We don't want to draw, so we'll just return a slightly negative value.
     if (board.IsDraw())
-      return (-1 * color, null);
+      return (0, null);
 
     if (depth == 0)
       return (EvaluatePosition(board), null);
