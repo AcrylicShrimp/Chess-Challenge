@@ -3,11 +3,8 @@ using System.Linq;
 using ChessChallenge.API;
 
 public class MyBot : IChessBot {
-  // Piece values: null, pawn, knight, bishop, rook, queen, king
-  static float[] pieceValues = { 0, 1, 3, 3, 5, 9, 100 };
-
   // Depth values for each remaining piece count.
-  static int[] depthValues = { 0, 0, 0, 10, 10, 9, 8, 7, 6, 5, 4, 3 };
+  static int[] depthValues = { 0, 0, 0, 20, 18, 12, 10, 8, 7, 6, 5, 4 };
 
   public Move Think(Board board, Timer timer) {
     var allMoves = PrioritizeMoves(board, board.GetLegalMoves());
@@ -21,36 +18,71 @@ public class MyBot : IChessBot {
   }
 
   /// <summary>
-  /// Evaluate a position. Positive values are good for white, negative values are good for black.
+  /// Evaluate a position in perspective of current player.
   /// </summary>
   public static float EvaluatePosition(Board board) {
-    // 1. Material score.
-    var material = 0f;
+    var player = EvaluateSinglePosition(board);
+    board.ForceSkipTurn();
+    var opponent = EvaluateSinglePosition(board);
+    board.UndoSkipTurn();
+    return player - opponent;
+  }
 
-    // Assign material score.
-    foreach (var pieceList in board.GetAllPieceLists())
-      if (pieceList.IsWhitePieceList)
-        foreach (var piece in pieceList)
-          material += pieceValues[(int)piece.PieceType];
-      else
-        foreach (var piece in pieceList)
-          material -= pieceValues[(int)piece.PieceType];
+  /// <summary>
+  /// Evaluate a position in perspective of current player. The value will be always positive.
+  /// </summary>
+  public static float EvaluateSinglePosition(Board board) {
+    // If we're in check, we're losing.
+    var score = board.IsInCheck() ? -1f : 0;
 
-    return material;
+    foreach (var pawn in board.GetPieceList(PieceType.Pawn, board.IsWhiteToMove)) {
+      score += 1; // 1 point for each pawn.
+      score += 0.1f * (pawn.IsWhite ? pawn.Square.Rank : 7 - pawn.Square.Rank); // 0.1 point for each rank advanced.
+      // TODO: Should we give additional points for passed pawns?
+    }
+
+    foreach (var knight in board.GetPieceList(PieceType.Knight, board.IsWhiteToMove)) {
+      score += 3; // 3 points for each knight.
+      score += 0.1f * (knight.IsWhite ? knight.Square.Rank : 7 - knight.Square.Rank); // 0.1 point for each rank advanced.
+    }
+
+    foreach (var bishop in board.GetPieceList(PieceType.Bishop, board.IsWhiteToMove)) {
+      score += 3; // 3 points for each bishop.
+    }
+
+    foreach (var rook in board.GetPieceList(PieceType.Rook, board.IsWhiteToMove)) {
+      score += 5; // 5 points for each rook.
+    }
+
+    foreach (var queen in board.GetPieceList(PieceType.Queen, board.IsWhiteToMove)) {
+      score += 9; // 9 points for each queen.
+    }
+
+    return score;
   }
 
   /// <summary>
   /// Prioritize moves with handcrafted heuristics.
   /// </summary>
   public static Move[] PrioritizeMoves(Board board, Move[] moves) {
-    Random rng = new();
+    return moves.Select(x => new {
+      x, score = ScoreMove(board, x)
+    }).OrderByDescending(x => x.score).Select(x => x.x).ToArray();
+  }
 
-    for (var i = 0; i < moves.Length; i++) {
-      var randomIndex = rng.Next(moves.Length);
-      (moves[randomIndex], moves[i]) = (moves[i], moves[randomIndex]);
-    }
+  /// <summary>
+  /// Score a move with handcrafted heuristics.
+  /// </summary>
+  public static float ScoreMove(Board board, Move move) {
+    if (move.IsPromotion) return 20;
+    if (move.IsCapture) return 10;
+    if (move.IsCastles) return 5;
 
-    return moves;
+    board.MakeMove(move);
+    var opponentScore = -EvaluatePosition(board);
+    board.UndoMove(move);
+
+    return opponentScore;
   }
 
   /// <summary>
@@ -66,14 +98,14 @@ public class MyBot : IChessBot {
       return (-1 * color, null);
 
     if (depth == 0)
-      return (EvaluatePosition(board) * (0 < color == board.IsWhiteToMove ? -1 : 1), null);
+      return (EvaluatePosition(board), null);
 
     var moves = PrioritizeMoves(board, board.GetLegalMoves());
     var value = -float.MaxValue;
     Move? move = null;
 
     foreach (var childMove in moves) {
-      if (200000000 < timer.MillisecondsElapsedThisTurn)
+      if (4000 < timer.MillisecondsElapsedThisTurn)
         break;
 
       board.MakeMove(childMove);
